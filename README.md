@@ -3,6 +3,8 @@
 Keep one PC usable while many AI coding agent sessions (Claude Code or any other) build, test and run games on it at
 the same time.
 
+**Status: stable, 1.0.** In daily use on a machine running a dozen agent sessions at once; all tests pass.
+
 ## The problem
 
 Run five or ten agent sessions on one machine and they all decide to compile, render or launch a game at once. The
