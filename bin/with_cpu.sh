@@ -151,6 +151,13 @@ case "$1" in
     rm -f "$PAUSE_DIR/${2,,}"; echo "with_cpu: resumed ${2,,}"; exit 0 ;;
 esac
 
+# A job whose command is itself a slot wrapper (`with_cpu.sh me bash with_gpu.sh me <cmd>`) takes no slot here: the
+# inner call picks the lane (otherwise the outer call would scan the wrapper's own text and hold a slot idle).
+if [ -z "$SLOT_LANE" ] && [ $# -ge 2 ]; then
+  j=$2; case "${j##*/}" in bash|bash.exe|sh) j=$3 ;; esac
+  case "${j##*/}" in with_cpu.sh|with_gpu.sh) shift; "$@"; exit $? ;; esac
+  unset j
+fi
 # Lock before slot: `with_cpu.sh me with_lock.sh me <cmd>` would take a slot and then wait for the project lock
 # inside it, idling a scarce slot. Take the project lock first, then the slot.
 if [ $# -ge 3 ] && [ "${2##*/}" = with_lock.sh ]; then
@@ -193,9 +200,6 @@ if [ -z "$SLOT_LANE" ] && [ $# -ge 2 ] && [ "${WITH_LANE:-auto}" != cpu ]; then
     done
     if [[ "$hay" =~ ($GPU_RE) ]]; then gpu=1; fi
   fi
-  if [ -n "$gpu" ] && [ -n "$IN_GPU_SLOT" ]; then
-    shift; "$@"; exit $?   # a step of a job that already holds a GPU slot shares that slot (a child, not exec: see with_gpu.sh)
-  fi
   if [ -n "$gpu" ]; then
     SLOT_LANE=gpu LANE_SLOTS=$GPU_SLOTS LANE_DIR=${GPU_SLOT_DIR:-$SLOT_HOME/gpu-slots} LANE_MAX_WAIT_MIN=${GPU_MAX_WAIT_MIN:-90}
   fi
@@ -222,6 +226,22 @@ POLL_MAX=${CPU_POLL_MAX_SEC:-30}
 AGE_EVERY=${CPU_AGE_CHECK_SEC:-60}   # folder-age checks fork find, so they run at most this often (and only on leftovers)
 [ $# -ge 2 ] || { echo "usage: $TOOL.sh <session-name> <command...>   (or --status)" >&2; exit 2; }
 owner="$1"; shift
+# Nested calls (with_cpu.sh inside a CPU job would take a second CPU slot, and could deadlock): the job gets
+# SLOT_LANES_HELD="<lane>:<slot>:<pid> ..." and a call inside it for a lane it already holds runs straight through, as a
+# child (never exec: see with_gpu.sh). An entry counts only while that pid lives and still owns that slot. A call for
+# the other lane still takes a slot there. SLOT_TAKE_EXTRA (set by with_gpu.sh --exclusive) asks for a second slot.
+held_lane() {
+  local e r s p k v
+  for e in $SLOT_LANES_HELD; do
+    [ "${e%%:*}" = "$LANE" ] || continue
+    r=${e#*:}; s=${r%%:*}; p=${r#*:}
+    kill -0 "$p" 2>/dev/null || continue
+    while read -r k v; do [ "$k" = pid ] && [ "$v" = "$p" ] && return 0; done < "$DIR/$s/owner" 2>/dev/null
+  done
+  [ "$LANE" = gpu ] && [ -n "$IN_GPU_SLOT" ] && [ -z "$SLOT_LANES_HELD" ]   # job started by an older copy
+}
+if [ -z "$SLOT_TAKE_EXTRA" ] && held_lane; then "$@"; exit $?; fi
+unset SLOT_TAKE_EXTRA
 for a in "$@"; do
   if [ "$a" = "-" ]; then
     echo "$TOOL: refusing '$*': a script on stdin never reaches the backgrounded job; write it to a file" >&2
@@ -417,7 +437,8 @@ if [ -n "$wf" ]; then
 fi
 printf '%(%F %T)T start %s %s waited=%ss\n' -1 "${KIND,,}" "$owner" "$(( SECONDS - start ))" >> "$LANE_LOG" 2>/dev/null   # wait times, for tuning slot counts
 
-[ "$KIND" = GPU ] && export IN_GPU_SLOT=1   # nested GPU steps of this job share its slot
+[ "$KIND" = GPU ] && export IN_GPU_SLOT=1   # for copies older than SLOT_LANES_HELD
+export SLOT_LANES_HELD="${SLOT_LANES_HELD:+$SLOT_LANES_HELD }$LANE:$slot:$$"   # nested calls of this lane share the slot
 pid=""; watcher=""
 trap '[ -n "$pid" ] && kill "$pid" 2>/dev/null; [ -n "$watcher" ] && kill "$watcher" 2>/dev/null; exit 143' TERM INT HUP
 "$@" &

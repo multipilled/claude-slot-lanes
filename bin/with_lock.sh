@@ -13,6 +13,18 @@
 LOCK="$WITH_LOCK_ROOT/.locks/${LOCK_NAME:-game}"
 mkdir -p "$WITH_LOCK_ROOT/.locks"
 owner="$1"; shift
+# Re-entrant: a job holding a lock gets WITH_LOCK_HELD lines "<pid><TAB><lock path>", and a call inside it
+# for the same lock runs straight through instead of waiting on itself. A line counts only while that pid lives and the
+# lock's pid file still names it. LOCK_MAX_WAIT_SEC (used by with_gpu.sh escalation) bounds the wait: exit 75.
+inside=""
+if [ -n "$WITH_LOCK_HELD" ]; then
+  while IFS=$'\t' read -r hp hl; do
+    lp=""; [ "$hl" = "$LOCK" ] && kill -0 "$hp" 2>/dev/null && [ -f "$LOCK/pid" ] && read -r lp < "$LOCK/pid"
+    [ -n "$lp" ] && [ "$lp" = "$hp" ] && inside=1
+  done <<< "$WITH_LOCK_HELD"
+fi
+if [ -n "$inside" ]; then "$@"; exit $?; fi
+max_wait=$LOCK_MAX_WAIT_SEC; unset LOCK_MAX_WAIT_SEC
 
 older_than() { [ -n "$(find "$LOCK" -maxdepth 0 -mmin +"$1" 2>/dev/null)" ]; }
 stale() {
@@ -43,10 +55,14 @@ until mkdir "$LOCK" 2>/dev/null; do
     continue
   fi
   if [ $announced -eq 0 ]; then echo "with_lock: waiting for lock held by $(cat "$LOCK/owner" 2>/dev/null)"; announced=1; fi
+  if [ -n "$max_wait" ] && [ $SECONDS -ge "$max_wait" ]; then
+    echo "with_lock: gave up after ${SECONDS}s waiting for ${LOCK_NAME:-game}; nothing ran: $*" >&2; exit 75
+  fi
   polls=$((polls + 1))
   sleep 3
 done
 trap 'rm -rf "$LOCK"' EXIT
+export WITH_LOCK_HELD="${WITH_LOCK_HELD:+$WITH_LOCK_HELD$'\n'}$$"$'\t'"$LOCK"
 echo $$ > "$LOCK/pid"
 printf '%s %(%T)T %s %s\n' "$owner" -1 "$PWD" "$*" > "$LOCK/owner"
 "$@"
