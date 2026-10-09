@@ -1,0 +1,4 @@
+# Copy to ~/.claude/cpu-patterns. Extended regexes (lower case) for jobs that must stay in the CPU lane even when the
+# script they run also mentions a GPU tool (checked first, against the command line only).
+make( |$)
+bazel (build|test)

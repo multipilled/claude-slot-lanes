@@ -1,0 +1,8 @@
+## Shared machine (paste into a project's CLAUDE.md)
+- Run every heavy job through the lanes: builds, tests and exporters with `with_cpu.sh <session> <cmd>`, game, engine,
+  Blender and AI-model runs with `with_gpu.sh <session> <cmd>`. Use your session's title as <session>.
+- Anything that runs the game or writes a shared build output also takes the project lock, lock first:
+  `with_gpu.sh <session> tools/with_lock.sh <session> <cmd>`.
+- Never pass a script on stdin (`python - <<EOF`); write a file. Exit 75 = no slot within 90 minutes (nothing ran),
+  76 = the game guard closed the job (it took the foreground), 77 = less than 2 GB free on the drive.
+- Background runs only: never take the mouse, keyboard or focus.

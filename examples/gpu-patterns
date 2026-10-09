@@ -1,0 +1,8 @@
+# Copy to ~/.claude/gpu-patterns. Extended regexes (lower case), one per line, added to the built-in list. A with_cpu.sh
+# job whose command line, or the first 400 lines of a script it runs, matches one goes to the GPU lane instead.
+# Typical entries: your own engine's or game's executable, a mod loader, a launcher.
+mygame\.exe
+cargo run -p my-engine
+target/(release|debug)/my-engine
+skse64_loader
+modorganizer

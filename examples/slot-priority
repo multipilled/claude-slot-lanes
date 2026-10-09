@@ -1,0 +1,5 @@
+# Copy to ~/.claude/slot-priority (or $SLOT_LANES_HOME/slot-priority). Best first, one fragment per line.
+# A job whose working folder or session name contains a line takes free CPU/GPU slots before lower-ranked and unlisted
+# jobs. Matching is case-insensitive; whitespace and # comments are ignored. Empty file: first come, first served.
+my-urgent-project
+second-project
