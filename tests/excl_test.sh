@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # with_gpu.sh --exclusive in an isolated state folder: the job runs to the end and both GPU slots are released.
-BIN="$(cd "$(dirname "$0")/../bin" && pwd)"
+BIN="${SLOT_BIN:-$(cd "$(dirname "$0")/.." && { [ -d bin ] && cd bin; pwd; })}"   # repo layout bin/, or flat
 T=$(mktemp -d)
 export SLOT_LANES_HOME="$T/state" GAME_GUARD=off
 timeout 90 bash "$BIN/with_gpu.sh" --exclusive excltest bash -c "sleep 2 && echo RAN > '$T/ran.txt'"

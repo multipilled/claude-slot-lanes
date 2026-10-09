@@ -2,7 +2,7 @@
 # Ranked priority, in an isolated state folder with 1 CPU slot. A holder keeps the slot 6 s; then an unranked waiter (z),
 # a rank-3 waiter (gamma), a rank-2 waiter (beta) and a rank-1 waiter (alpha) queue in that order.
 # Expected run order after the holder: alpha beta gamma z.
-BIN="$(cd "$(dirname "$0")/../bin" && pwd)"
+BIN="${SLOT_BIN:-$(cd "$(dirname "$0")/.." && { [ -d bin ] && cd bin; pwd; })}"   # repo layout bin/, or flat
 T=$(mktemp -d)
 mkdir -p "$T/state" "$T/alpha-proj" "$T/beta-proj" "$T/gamma-proj" "$T/other"
 printf 'alpha-proj\nbeta-proj   # second\ngamma-proj\n' > "$T/state/slot-priority"

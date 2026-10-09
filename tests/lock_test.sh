@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # with_lock.sh: two jobs on one lock never overlap, and a lock left by a dead PID is taken over at once.
-BIN="$(cd "$(dirname "$0")/../bin" && pwd)"
+BIN="${SLOT_BIN:-$(cd "$(dirname "$0")/.." && { [ -d bin ] && cd bin; pwd; })}"   # repo layout bin/, or flat
 T=$(mktemp -d)
 export WITH_LOCK_ROOT="$T"
 job() { bash "$BIN/with_lock.sh" "$1" bash -c "echo start-$1 >> '$T/log'; sleep 2; echo end-$1 >> '$T/log'" >/dev/null; }

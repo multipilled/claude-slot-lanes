@@ -6,3 +6,5 @@
 - Never pass a script on stdin (`python - <<EOF`); write a file. Exit 75 = no slot within 90 minutes (nothing ran),
   76 = the game guard closed the job (it took the foreground), 77 = less than 2 GB free on the drive.
 - Background runs only: never take the mouse, keyboard or focus.
+- `with_cpu.sh --status` prints who holds and who waits (one JSON line). A job that says "paused by" is held on purpose
+  (`slot-pause/`); leave it queued, never retry around it.

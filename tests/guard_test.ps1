@@ -1,6 +1,7 @@
 # game_guard.ps1 (Windows): a job's leftover child is closed when the job ends; an unrelated process started during the
 # job survives.   powershell -ExecutionPolicy Bypass -File tests\guard_test.ps1
-$guard = Join-Path $PSScriptRoot "..\bin\game_guard.ps1"
+$bin = if ($env:SLOT_BIN) { $env:SLOT_BIN } elseif (Test-Path (Join-Path $PSScriptRoot "..\bin")) { Join-Path $PSScriptRoot "..\bin" } else { Join-Path $PSScriptRoot ".." }
+$guard = Join-Path $bin "game_guard.ps1"
 $log = Join-Path $env:TEMP ("guard_test_{0}.log" -f $PID)
 $errs = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($guard, [ref]$null, [ref]$errs)
 $victim = Start-Process ping -ArgumentList '-n','40','127.0.0.1' -WindowStyle Hidden -PassThru

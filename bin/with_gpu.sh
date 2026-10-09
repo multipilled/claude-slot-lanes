@@ -41,9 +41,9 @@ if [ "$1" = "--exclusive" ]; then
 fi
 
 if [ -n "$IN_GPU_SLOT" ]; then   # second slot of an exclusive job: this process IS the first slot's job, so stay alive
-  SLOT_LANE=gpu LANE_SLOTS="${GPU_SLOTS:-3}" LANE_DIR="$GDIR" LANE_MAX_WAIT_MIN="${GPU_MAX_WAIT_MIN:-90}" \
+  SLOT_LANE=gpu LANE_SLOTS="$GPU_SLOTS" LANE_DIR="$GDIR" LANE_MAX_WAIT_MIN="${GPU_MAX_WAIT_MIN:-90}" \
     bash "$BIN/with_cpu.sh" "$@"
   exit $?
 fi
-SLOT_LANE=gpu LANE_SLOTS="${GPU_SLOTS:-3}" LANE_DIR="$GDIR" LANE_MAX_WAIT_MIN="${GPU_MAX_WAIT_MIN:-90}" \
+SLOT_LANE=gpu LANE_SLOTS="$GPU_SLOTS" LANE_DIR="$GDIR" LANE_MAX_WAIT_MIN="${GPU_MAX_WAIT_MIN:-90}" \
   exec bash "$BIN/with_cpu.sh" "$@"

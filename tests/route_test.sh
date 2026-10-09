@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-routing: GPU tools go to the GPU lane, compiles stay CPU, user patterns and WITH_LANE override work.
-BIN="$(cd "$(dirname "$0")/../bin" && pwd)"
+BIN="${SLOT_BIN:-$(cd "$(dirname "$0")/.." && { [ -d bin ] && cd bin; pwd; })}"   # repo layout bin/, or flat
 T=$(mktemp -d)
 export SLOT_LANES_HOME="$T/state" GAME_GUARD=off CPU_POLL_SEC=1
 mkdir -p "$T/state"; echo 'mygame\.exe' > "$T/state/gpu-patterns"
