@@ -157,7 +157,7 @@ status() {
       [ -n "$root" ] || continue
       for lk in "$root/.locks"/*; do
         [ -d "$lk" ] || continue
-        case ${lk##*/} in *.stale.*) continue ;; esac
+        case ${lk##*/} in *.stale.*|*.queue) continue ;; esac   # takeover leftovers; .queue = old per-project queues
         read_owner "$lk/owner"
         lp=""; [ -f "$lk/pid" ] && read -r lp < "$lk/pid"
         alive=false; [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null && alive=true
