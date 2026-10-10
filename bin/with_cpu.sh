@@ -3,7 +3,8 @@
 # can just exec this). Heavy jobs (builds, engine runs, headless decompilers, exporters, big scans) take one of
 # $CPU_SLOTS slots and run at below-normal priority (re-applied to late children), so the desktop stays responsive.
 #   with_cpu.sh <session-name> <command...>
-#   with_cpu.sh --status                     one line of JSON: caps, holders, ages, waiters, pauses (both lanes)
+#   with_cpu.sh --status                     one line of JSON: caps, holders, ages, waiters, pauses, locks
+#   with_cpu.sh --table                      the same as a table for people (slot_status.sh)
 #   with_cpu.sh --cap cpu|gpu <n>|default    change a lane's cap live (waiters pick it up on their next check)
 #   with_cpu.sh --pause <lane|all|fragment> [reason]  /  --resume <same>     hold matching waiters
 # Combine with with_lock.sh for anything that touches a shared build artifact or runs a game.
@@ -77,10 +78,35 @@ json_str() {
 # --status (a cheap stand-in for a job daemon's API): one line of JSON for a dashboard, a scheduler or any session.
 #   {"time":<epoch>,"lanes":{"cpu":{"cap":4,"running":1,"holders":[{"slot":1,"session":..,"pid":..,"alive":true,
 #    "age_s":..,"cwd":..,"cmd":..}],"waiters":[{"rank":1,"pid":..,"session":..,"age_s":..,"paused":false}],
-#    "paused_by":null},"gpu":{...}},"pauses":[{"name":..,"reason":..}]}
+#    "paused_by":null},"gpu":{...}},"pauses":[{"name":..,"reason":..}],
+#    "locks":[{"root":..,"name":..,"session":..,"pid":..,"alive":true,"age_s":..,"cwd":..,"cmd":..}]}
 # rank 0 = unranked. Ages come from the owner's start line (or its HH:MM:SS for jobs started by an older copy).
+# Locks are read from every root listed in $SLOT_LANES_HOME/lock-roots (with_lock.sh adds its root on first use).
+# --table (and slot_status.sh) prints the same picture as a table for people.
+# Reads an owner file $1: sets sess, cwd, cmd, sp (pid), age (seconds or null). Needs now and today.
+read_owner() {
+  local first="" k v st="" t rest
+  sp=""
+  if [ -f "$1" ]; then
+    { IFS= read -r first; while read -r k v; do [ "$k" = pid ] && sp=$v; [ "$k" = start ] && st=$v; done; } < "$1"
+  fi
+  sess=${first%% *}; rest=${first#* }; t=${rest%% *}; rest=${rest#* }; cwd=${rest%% *}; cmd=${rest#* }
+  if [ -n "$st" ]; then age=$(( now - st ))
+  elif [[ "$t" =~ ^([0-9]{2}):([0-9]{2}):([0-9]{2})$ ]]; then
+    age=$(( now - today - (10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]}) ))
+    [ $age -lt 0 ] && age=$(( age + 86400 ))
+  else age=null; fi
+  [ -n "$first" ] || { sess=""; cwd=""; cmd=""; }
+}
+# Table row: kind, where, session, pid, state, age seconds, detail.
+row() {
+  local a=$6 line
+  [ "$a" = null ] && a="?" || a="$((a / 60))m"
+  printf -v line '%-9s %-28s %-24s %-7s %-8s %6s  %s' "$1" "${2:0:28}" "${3:0:24}" "$4" "$5" "$a" "${7:0:90}"
+  tbl+="$line"$'\n'
+}
 status() {
-  local now lane dir cap d n first k v sp st t sess cwd cmd out hs ws f b r rest p e alive age pf lr sep=""
+  local now lane dir cap d n k v sp t sess cwd cmd out hs ws f b r rest p e alive age pf lr root lk lp js jc jw sep="" tbl="" table=$1
   printf -v now '%(%s)T' -1
   printf -v t '%(%H:%M:%S)T' -1
   local today=$(( now - (10#${t:0:2} * 3600 + 10#${t:3:2} * 60 + 10#${t:6:2}) ))
@@ -91,20 +117,11 @@ status() {
     hs=""; ws=""; n=0
     for d in "$dir"/[0-9]*; do
       [ -d "$d" ] || continue
-      sp=""; st=""; first=""
-      if [ -f "$d/owner" ]; then
-        { IFS= read -r first; while read -r k v; do [ "$k" = pid ] && sp=$v; [ "$k" = start ] && st=$v; done; } < "$d/owner"
-      fi
+      read_owner "$d/owner"
       alive=false; [ -n "$sp" ] && kill -0 "$sp" 2>/dev/null && { alive=true; n=$((n + 1)); }
-      sess=${first%% *}; rest=${first#* }; t=${rest%% *}; rest=${rest#* }; cwd=${rest%% *}; cmd=${rest#* }
-      if [ -n "$st" ]; then age=$(( now - st ))
-      elif [[ "$t" =~ ^([0-9]{2}):([0-9]{2}):([0-9]{2})$ ]]; then
-        age=$(( now - today - (10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]}) ))
-        [ $age -lt 0 ] && age=$(( age + 86400 ))
-      else age=null; fi
-      [ -n "$first" ] || { sess=""; cwd=""; cmd=""; }
-      json_str "$sess" sess; json_str "$cwd" cwd; json_str "${cmd:0:200}" cmd
-      hs+="${hs:+,}{\"slot\":${d##*/},\"session\":$sess,\"pid\":${sp:-null},\"alive\":$alive,\"age_s\":$age,\"cwd\":$cwd,\"cmd\":$cmd}"
+      [ "$table" ] && row "$lane slot" "${d##*/}" "$sess" "${sp:--}" "$([ $alive = true ] && echo running || echo dead)" "$age" "$cmd"
+      json_str "$sess" js; json_str "$cwd" jw; json_str "${cmd:0:200}" jc
+      hs+="${hs:+,}{\"slot\":${d##*/},\"session\":$js,\"pid\":${sp:-null},\"alive\":$alive,\"age_s\":$age,\"cwd\":$jw,\"cmd\":$jc}"
     done
     for f in "$dir/.wait"/*; do
       [ -e "$f" ] || continue
@@ -115,11 +132,13 @@ status() {
       [[ "$r" =~ ^[0-9]+$ ]] || continue
       [ "$r" -ge 9999 ] && r=0
       [[ "$e" =~ ^[0-9]+$ ]] && age=$(( now - e )) || age=null
+      [ "$table" ] && row "$lane wait" "rank $([ $r = 0 ] && echo - || echo $r)" "$sess" "$p" "$([ $pf = true ] && echo paused || echo waiting)" "$age" ""
       json_str "$sess" sess
       ws+="${ws:+,}{\"rank\":$r,\"pid\":$p,\"session\":$sess,\"age_s\":$age,\"paused\":$pf}"
     done
     paused_by $lane ""
     lr=null; [ -n "$pause" ] && json_str "$pause" lr
+    [ "$table" ] && tbl+="$lane: $n / $cap running${pause:+, paused by $pause}"$'\n'
     out+="$sep\"$lane\":{\"cap\":$cap,\"running\":$n,\"holders\":[$hs],\"waiters\":[$ws],\"paused_by\":$lr}"; sep=,
   done
   out+="},\"pauses\":["
@@ -127,14 +146,38 @@ status() {
   for f in "$PAUSE_DIR"/*; do
     [ -f "$f" ] || continue
     v=""; IFS= read -r v < "$f"
+    [ "$table" ] && tbl+="pause ${f##*/}: $v"$'\n'
     json_str "${f##*/}" b; json_str "$v" v
     ws+="${ws:+,}{\"name\":$b,\"reason\":$v}"
   done
-  echo "$out$ws]}"
+  out+="$ws],\"locks\":["
+  ws=""
+  if [ -f "$SLOT_HOME/lock-roots" ]; then
+    while IFS= read -r root; do
+      [ -n "$root" ] || continue
+      for lk in "$root/.locks"/*; do
+        [ -d "$lk" ] || continue
+        case ${lk##*/} in *.stale.*) continue ;; esac
+        read_owner "$lk/owner"
+        lp=""; [ -f "$lk/pid" ] && read -r lp < "$lk/pid"
+        alive=false; [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null && alive=true
+        [ "$table" ] && row "lock" "${root##*/}/${lk##*/}" "$sess" "${lp:--}" "$([ $alive = true ] && echo held || echo dead)" "$age" "$cmd"
+        json_str "$root" jw; json_str "${lk##*/}" b; json_str "$sess" js; json_str "${cmd:0:200}" jc; json_str "$cwd" cwd
+        ws+="${ws:+,}{\"root\":$jw,\"name\":$b,\"session\":$js,\"pid\":${lp:-null},\"alive\":$alive,\"age_s\":$age,\"cwd\":$cwd,\"cmd\":$jc}"
+      done
+    done < "$SLOT_HOME/lock-roots"
+  fi
+  if [ "$table" ]; then
+    printf '%-9s %-28s %-24s %-7s %-8s %6s  %s\n' KIND WHERE SESSION PID STATE AGE COMMAND
+    printf '%s' "$tbl"
+  else
+    echo "$out$ws]}"
+  fi
 }
 
 case "$1" in
   --status) status; exit 0 ;;
+  --table) status table; exit 0 ;;
   --cap)
     [[ "$2" =~ ^(cpu|gpu)$ ]] && [[ "$3" =~ ^([0-9]+|default)$ ]] || { echo "usage: with_cpu.sh --cap cpu|gpu <n>|default" >&2; exit 2; }
     mkdir -p "$SLOT_HOME"; tmp="$CAPS_FILE.$$"; : > "$tmp"

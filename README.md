@@ -18,6 +18,7 @@ wrapper.
 |---|---|
 | `with_cpu.sh` | CPU lane. A machine-wide pool of slots (default 4). Heavy jobs wait for a slot and run at below-normal priority, so the desktop stays responsive. |
 | `with_gpu.sh` | GPU lane. Its own pool (default 3; the 3rd opens only with 4 GB of VRAM free) for game and engine runs, Blender, emulators and AI models. `--exclusive` takes the whole card. |
+| `slot_status.sh` | Table of who holds which slot and lock, and who is waiting (`--json` for the raw status line). |
 | `with_lock.sh` | Per-project lock shared by every session and git worktree of the project, so only one job at a time runs the game or writes a shared build output. |
 | `game_guard.ps1` | Windows game guard for GPU-lane jobs: the job's windows can never take your foreground, keyboard or cursor (minimized without activating; the 3rd strike closes the job), and whatever the job left open is closed when it ends. |
 
@@ -26,7 +27,7 @@ What makes it robust on a busy machine:
   ...) move to the GPU lane by themselves. The wrapper also reads the first 400 lines of a script the job runs. Compiles
   always stay CPU. Add your own patterns in `gpu-patterns` / `cpu-patterns`, or force a lane with `WITH_LANE=cpu|gpu`.
 - **PID-safe slots and locks.** A slot or lock remembers its holder's PID: a dead holder's slot is freed at once, a live
-  one is never stolen however long it runs. Stale locks are renamed away before they are deleted, so two waiters can
+  one is never stolen however long it runs (no age-only takeover, for slots or locks). Stale locks are renamed away before they are deleted, so two waiters can
   never delete each other's fresh lock. The game guard matches processes by PID *and* creation time, so a reused PID
   never gets an unrelated program closed.
 - **Ranked priority.** List folder or session-name fragments in `slot-priority`, best first: ranked jobs take free slots
@@ -46,7 +47,8 @@ What makes it robust on a busy machine:
   `--resume <name>` lets them go. A paused waiter never holds back anyone else, and paused time does not count toward
   the 90-minute give-up.
 - **One-line status.** `with_cpu.sh --status` prints one line of JSON for both lanes: caps, holders with ages and
-  commands, waiters with rank and age, pauses with reasons. Feed it to a dashboard or a scheduler.
+  commands, waiters with rank and age, pauses with reasons, and every project lock with its holder PID, age and name.
+  Feed it to a dashboard or a scheduler. `slot_status.sh` (or `with_cpu.sh --table`) prints the same as a table.
 
 ## Install
 
@@ -74,7 +76,8 @@ paste `examples/CLAUDE.md.snippet` into the project's `CLAUDE.md` (or your agent
 The session name shows up in every slot's owner file and in the logs, so you can see who holds what:
 
 ```bash
-~/.claude/bin/with_cpu.sh --status          # {"time":..,"lanes":{"cpu":{"cap":4,"running":1,"holders":[..],"waiters":[..],"paused_by":null},"gpu":{..}},"pauses":[..]}
+~/.claude/bin/with_cpu.sh --status          # {"time":..,"lanes":{"cpu":{"cap":4,"running":1,"holders":[..],"waiters":[..],"paused_by":null},"gpu":{..}},"pauses":[..],"locks":[..]}
+~/.claude/bin/slot_status.sh               # the same as a table: KIND WHERE SESSION PID STATE AGE COMMAND
 ~/.claude/bin/with_cpu.sh --cap gpu 2       # or: --cap gpu default
 ~/.claude/bin/with_cpu.sh --pause my-polish-project "weekly budget low"
 ~/.claude/bin/with_cpu.sh --resume my-polish-project
